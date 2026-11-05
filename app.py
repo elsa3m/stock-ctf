@@ -39,13 +39,13 @@ import streamlit as st
 from core import tema, ui
 from core.ui import h, md, num
 
-VERSION = "03/11/2026 · 1"
+VERSION = "03/11/2026 · 3"
 BASE = Path(__file__).resolve().parent
 DATA_RAIZ = BASE / "data"
 DATA_RAIZ.mkdir(exist_ok=True)
 
 st.set_page_config(page_title="Stock CTF", page_icon="📦", layout="wide")
-st.session_state.setdefault("tema", "claro")
+tema.iniciar()                       # oscuro por defecto; el botón lo deja claro
 tema.inyectar()
 
 
@@ -407,26 +407,27 @@ def _aviso_respaldo() -> None:
 
 def _css_tablas_claras() -> str:
     """
-    Todas las tablas de la vista (tablas y mapas de calor) en CLARO, como el
-    evolutivo diario y Meta del día: encabezado azul CTF, fondo blanco y el
-    semáforo en sus tonos para fondo claro. Se inyecta sólo en la vista que la
-    pide, así que las demás pestañas no cambian.
+    Todas las tablas de la vista (tablas y mapas de calor) con encabezado azul
+    CTF y el cuerpo en los colores del tema elegido (claro u oscuro).
     """
-    c = tema.TEMAS["claro"]
-    E = {k: v["claro"] for k, v in tema.ESTADO.items()}
+    c = tema.actual()
+    E = {k: v[c["clave_estado"]] for k, v in tema.ESTADO.items()}
+    oscuro = c["clave_estado"] == "oscuro"
+    fija, hover, tot = ((c["tarjeta2"], c["borde"], c["tarjeta2"]) if oscuro
+                        else ("#f4f7fb", "#eef3fa", "#e8eef7"))
     T = ".tabla-caja"
     return f"""<style>
-{T} {{ background:#ffffff !important; border:1px solid {c['borde_fuerte']} !important;
+{T} {{ background:{c['tarjeta']} !important; border:1px solid {c['borde_fuerte']} !important;
   box-shadow:{c['sombra']}; }}
-{T} table.tabla {{ background:#ffffff !important; }}
+{T} table.tabla {{ background:{c['tarjeta']} !important; }}
 {T} table.tabla th, {T} table.tabla th.fija {{ background:#1F3B63 !important; color:#ffffff !important;
   border-bottom:1px solid #1F3B63 !important; }}
 {T} table.tabla th * {{ color:#ffffff !important; }}
 {T} table.tabla th .t-tenue {{ color:#c9d6ea !important; }}
 {T} table.tabla td {{ color:{c['texto']} !important; border-bottom:1px solid {c['borde']} !important; }}
-{T} table.tabla td.fija {{ background:#f4f7fb !important; color:#10233f !important; }}
-{T} table.tabla tbody tr:hover td {{ background:#eef3fa !important; }}
-{T} table.tabla tr.total td, {T} table.tabla tr.grupo td {{ background:#e8eef7 !important; }}
+{T} table.tabla td.fija {{ background:{fija} !important; color:{c['texto']} !important; }}
+{T} table.tabla tbody tr:hover td {{ background:{hover} !important; }}
+{T} table.tabla tr.total td, {T} table.tabla tr.grupo td {{ background:{tot} !important; }}
 {T} .t-bien {{ color:{E['bien']} !important; }}
 {T} .t-medio {{ color:{E['medio']} !important; }}
 {T} .t-mal {{ color:{E['mal']} !important; }}
@@ -434,11 +435,11 @@ def _css_tablas_claras() -> str:
 {T} .chip.bien {{ background:{c['chip_bien']} !important; color:{E['bien']} !important; }}
 {T} .chip.medio {{ background:{c['chip_medio']} !important; color:{E['medio']} !important; }}
 {T} .chip.mal {{ background:{c['chip_mal']} !important; color:{E['mal']} !important; }}
-{T} table.tabla.mapa td.hm.bien {{ background:#d7f2dc !important; color:#11713a !important; }}
-{T} table.tabla.mapa td.hm.medio {{ background:#fdefc8 !important; color:#8a5a00 !important; }}
-{T} table.tabla.mapa td.hm.mal {{ background:#fbdcdc !important; color:#b42323 !important; }}
-{T} table.tabla.mapa td.hm.nulo {{ color:#10233f !important; }}
-{T} table.tabla.mapa td.hm {{ border-right:1px solid #ffffff !important; }}
+{T} table.tabla.mapa td.hm.bien {{ background:{c['chip_bien']} !important; color:{E['bien']} !important; }}
+{T} table.tabla.mapa td.hm.medio {{ background:{c['chip_medio']} !important; color:{E['medio']} !important; }}
+{T} table.tabla.mapa td.hm.mal {{ background:{c['chip_mal']} !important; color:{E['mal']} !important; }}
+{T} table.tabla.mapa td.hm.nulo {{ color:{c['texto']} !important; }}
+{T} table.tabla.mapa td.hm {{ border-right:1px solid {c['tarjeta']} !important; }}
 {T} table.tabla.mapa tbody tr:hover td.hm {{ filter:brightness(.97); }}
 </style>"""
 
@@ -841,7 +842,8 @@ def _excel_stock(hojas: dict) -> bytes:
 
 
 def vista_stock() -> None:
-    md(_css_tablas_claras() + CSS_STOCK)
+    _t = tema.actual()
+    md(_css_tablas_claras() + CSS_STOCK.replace("#f4f7fb", _t["tarjeta2"]).replace("#c3ccd9", _t["borde_fuerte"]))
     ui.seccion("📦 Stock",
                "Stock de cada tienda (SAP) menos lo vendido hoy en Bsale, y la rotación del mes "
                "de cada producto contra el stock que queda.")
@@ -929,7 +931,7 @@ def vista_stock() -> None:
     with c3:
         clases = st.multiselect("Clase", ["Venta", "Exhibición", "Buyback", "Otros"],
                                 default=["Venta"], key="stk_clase")
-    c4, c5, c6 = st.columns([1.6, 1.6, 1])
+    c4, c5 = st.columns([1.6, 1.6])
     base = s[s["pdv"].isin(tiendas) & s["tipo"].isin(tipos) & s["clase"].isin(clases)]
     with c4:
         cats = sorted(base["categoria"].unique())
@@ -938,9 +940,7 @@ def vista_stock() -> None:
     with c5:
         buscar = st.text_input("SKU o descripción", key="stk_buscar",
                                placeholder="Ej: 108421 o IPHONE 17")
-    with c6:
-        agrupar = st.radio("Ver", ["Por tienda", "Todas juntas"], key="stk_agrupar",
-                           horizontal=False)
+    agrupar = "Por tienda"   # siempre detalle por tienda (se quitó el selector «Ver»)
     if cat_sel:
         base = base[base["categoria"].isin(cat_sel)]
     if buscar.strip():
@@ -1041,46 +1041,6 @@ def vista_stock() -> None:
             d[c_] = []
     d["tienda"] = d["pdv"].map(lambda p: NOMBRE_TIENDA.get(p, p))
 
-    # ── banda de totales ────────────────────────────────────────────────────
-    cnt = d["estado"].value_counts() if not d.empty else pd.Series(dtype=int)
-    t_stock = [
-        {"rot": "🏷️ SKU", "v": num(d["sku"].nunique()), "pie": f"{num(len(d))} filas tienda-SKU"},
-        {"rot": "✅ Disponible", "v": num(d["disponible"].sum()), "pie": "libre utilización (SAP)"},
-        {"rot": "🚚 En tránsito", "v": num(d["transito"].sum()), "pie": "por llegar"},
-        {"rot": "⛔ Bloqueado", "v": num(d["bloqueado"].sum()), "pie": "no vendible",
-         "estado": "mal" if d["bloqueado"].sum() else ""},
-        {"rot": "🧾 Vendido hoy", "v": num(d["vendido_hoy"].sum()), "pie": f"Bsale del {elegida:%d/%m}"},
-        {"rot": "📦 Stock actual", "v": num(d["actual"].sum()), "pie": "disponible − vendido hoy",
-         "estado": "bien"},
-    ]
-    t_rot = [
-        {"rot": "🔴 Quiebre", "v": num(cnt.get("Quiebre", 0)), "pie": "vende y no hay stock",
-         "estado": "mal" if cnt.get("Quiebre", 0) else ""},
-        {"rot": "🟠 Reponer", "v": num(cnt.get("Reponer", 0)),
-         "pie": f"menos de {COBERTURA_REPONER} días", "estado": "medio" if cnt.get("Reponer", 0) else ""},
-        {"rot": "🟣 Sobre stock", "v": num(cnt.get("Sobre stock", 0)),
-         "pie": f"más de {COBERTURA_SOBRE} días"},
-        {"rot": "⚪ Sin rotación", "v": num(cnt.get("Sin rotación", 0)), "pie": "stock sin venta en el mes"},
-    ]
-    md(_banda_fibra([("Stock", t_stock, "#0e7490"),
-                     ("Rotación (SKU tienda, clase venta)", t_rot, "#7c3aed")]))
-    canales_hay = sorted(set(sal["canal"])) if not sal.empty else []
-    notas = (f'<b>Stock actual</b> = disponible (SAP del {fecha:%d/%m}) − lo vendido en Bsale el {elegida:%d/%m} '
-             '(la tienda se deduce del vendedor). <b>Rotación</b>: todo lo que salió de la tienda en los '
-             f'últimos <b>{dias_vent} días</b> (del {desde_ts:%d/%m/%Y} al {hasta_ts:%d/%m/%Y}): '
-             'venta en tienda + retiro en tienda + delivery → venta diaria → <b>días de cobertura</b> = '
-             f'stock actual ÷ venta diaria. Reponer bajo {COBERTURA_REPONER} días, sobre stock sobre '
-             f'{COBERTURA_SOBRE}, sin rotación = con stock y sin ninguna salida en esos días.')
-    notas += (f' Canales con datos: <b>{", ".join(canales_hay)}</b>.' if canales_hay else
-              ' <b>Sin historial ni bases de EQUIPOS/ACCESORIOS</b>: no hay venta con qué medir.')
-    if "Retiro" not in canales_hay or "Delivery" not in canales_hay:
-        notas += ' Para sumar retiro en tienda y delivery, cárgalos en «📚 Historial de ventas y salidas».'
-    if not BSALE_DATOS.exists():
-        notas += ' <b>Sin Bsale cargado</b>: súbelo arriba en «🧾 Venta del día (Bsale)» para descontar la venta de hoy.'
-    if sin_tienda:
-        notas += f' {sin_tienda} línea(s) de Bsale no se pudieron asignar a una tienda (vendedor sin cruce).'
-    md(f'<div class="seccion-sub fx-nota" style="font-size:.78rem">{notas}</div>')
-
     if d.empty:
         st.info("No hay productos con esos filtros.")
         return
@@ -1094,7 +1054,6 @@ def vista_stock() -> None:
         ("SIM cards", "#7a1f6e", lambda g: g[(g["tipo"] == "SIM cards") & (g["disponible"] > 0)], "disponible"),
         ("En tránsito", "#2f6fb0", lambda g: g[g["transito"] > 0], "transito"),
         ("Bloqueado", "#b42323", lambda g: g[g["bloqueado"] > 0], "bloqueado"),
-        ("Vendido hoy", "#11713a", lambda g: g[g["vendido_hoy"] > 0], "vendido_hoy"),
         ("Stock actual", "#1F3B63", lambda g: g[g["actual"] > 0], "actual"),
         ("Vendido mes", "#0e7490", lambda g: g[g["vendido_mes"] > 0], "vendido_mes"),
         ("Quiebre", "#c2410c", lambda g: g[g["estado"] == "Quiebre"], "vendido_mes"),
@@ -1114,72 +1073,6 @@ def vista_stock() -> None:
     filas = [_fila_res(d[d["pdv"] == p], f'<b>{h(NOMBRE_TIENDA.get(p, p))}</b>')
              for p in [x for x in pdvs if x in set(d["pdv"])]]
     total = _fila_res(d, "<b>Total</b>")
-    # cabecera en dos pisos: cada indicador con SKU y Unid. debajo
-    with desplegable("🏬 Resumen por tienda", expanded=False):
-        colores = "".join(f".tabla-caja.res2 table.tabla th.gc{k} {{ background:{c} !important; }}"
-                          for k, (_, c, _, _) in enumerate(GRUPOS_RES))
-        cab = ('<tr><th rowspan="2" class="izq fija">Tienda</th>'
-               + "".join(f'<th colspan="2" class="g-cen g-ini gc{k}">{h(nm)}</th>'
-                         for k, (nm, _, _, _) in enumerate(GRUPOS_RES))
-               + '</tr><tr>'
-               + "".join(f'<th class="g-sub g-ini gc{k}">SKU</th><th class="g-sub gc{k}">Unid.</th>'
-                         for k in range(len(GRUPOS_RES)))
-               + '</tr>')
-
-        def _tr(f, clase=""):
-            celdas = ""
-            for k, c in enumerate(f):
-                cl = "izq fija" if k == 0 else ("g-ini" if k % 2 == 1 else "g-der")
-                celdas += f'<td class="{cl}">{c}</td>'
-            return f'<tr class="{clase}">{celdas}</tr>'
-
-        md(f'<style>{colores}</style><div class="tabla-caja stk res2"><table class="tabla"><thead>{cab}</thead><tbody>'
-           + "".join(_tr(f) for f in filas) + _tr(total, "total") + '</tbody></table></div>')
-        md('<div class="seccion-sub" style="font-size:.74rem">Cada indicador en <b>SKU</b> (productos '
-           'distintos) y <b>Unid.</b> Equipos y accesorios: con stock disponible. Quiebre: unidades '
-           'vendidas en el mes de esos productos (lo que se deja de vender). Reponer, sobre stock y '
-           'sin rotación: su stock actual. En Total, SKU cuenta productos distintos de todas las '
-           'tiendas juntas.</div>')
-
-    # ── ventas por mes ──────────────────────────────────────────────────────
-    with desplegable("📈 Ventas por mes (todas las salidas, por producto)", expanded=False):
-        if sal.empty:
-            st.caption("Sin historial cargado todavía.")
-        else:
-            cm1, cm2 = st.columns([1.2, 2])
-            with cm1:
-                por_m = st.radio("Mostrar", ["Por producto", "Por producto y tienda"],
-                                 key="stk_mes_por", horizontal=True)
-            with cm2:
-                canales_m = st.multiselect("Canales", HIST_CANALES, default=HIST_CANALES,
-                                           key="stk_mes_canal")
-            claves_m = d[["pdv", "sku"]].drop_duplicates()
-            sm = sal[sal["canal"].isin(canales_m)].merge(claves_m, on=["pdv", "sku"])
-            sm = sm.assign(mes=sm["fecha"].dt.strftime("%Y-%m"))
-            idx = ["sku"] if por_m == "Por producto" else ["pdv", "sku"]
-            pm = sm.pivot_table(index=idx, columns="mes", values="q", aggfunc="sum", fill_value=0)
-            meses_m = list(pm.columns)
-            pm.columns = [_mes_nombre(c)[:3] + " " + c[2:4] for c in meses_m]
-            pm["Total"] = pm.sum(axis=1)
-            info = (d.groupby(idx).agg(descripcion=("descripcion", "first"), tipo=("tipo", "first"),
-                                        actual=("actual", "sum")))
-            est_ = d.groupby(idx)["estado"].agg(lambda x: x.mode().iat[0] if len(x) else "—")
-            pm = info.join(pm, how="inner").join(est_.rename("estado"))
-            pm = pm.reset_index().sort_values("Total", ascending=False)
-            if "pdv" in pm:
-                pm.insert(0, "Tienda", pm.pop("pdv").map(lambda p: NOMBRE_TIENDA.get(p, p))
-                          .str.replace(r"^CTF\s+", "", regex=True).str.title())
-            pm = pm.rename(columns={"sku": "SKU", "descripcion": "Descripción", "tipo": "Tipo",
-                                    "actual": "Stock act.", "estado": "Estado"})
-            st.dataframe(pm, hide_index=True, use_container_width=True, height=420)
-            md('<div class="seccion-sub" style="font-size:.74rem">Unidades que salieron de la tienda '
-               'cada mes (venta en tienda + retiro + delivery, según los canales elegidos), para los '
-               'productos que pasan los filtros de arriba. Ordenado por el total.</div>')
-            st.download_button("⬇️ Ventas por mes en Excel", _excel_stock({"Ventas por mes": pm}),
-                               file_name=f"ventas_por_mes_{fecha:%Y-%m-%d}.xlsx",
-                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                               key="stk_mes_xlsx")
-
     # ── detalle por SKU ─────────────────────────────────────────────────────
     with desplegable("📋 Detalle por producto", expanded=True):   # (v445) siempre abierto
         ui.seccion("Detalle por producto",
@@ -1207,7 +1100,7 @@ def vista_stock() -> None:
         else:
             cols = ["tienda"]
         cols += ["sku", "descripcion", "tipo", "categoria", "clase", "disponible", "transito",
-                 "bloqueado", "vendido_hoy", "actual", "vendido_mes", "v_tienda", "v_retiro", "v_delivery",
+                 "bloqueado", "actual", "vendido_mes", "v_tienda", "v_retiro", "v_delivery",
                  "vendido_vent", "venta_mes_prom", "venta_dia", "cobertura", "tendencia",
                  "dias_sin_venta", "estado"]
         nombres = {"tienda": "Tienda", "sku": "SKU", "descripcion": "Descripción", "tipo": "Tipo",
@@ -1235,9 +1128,15 @@ def vista_stock() -> None:
             "Prom. mensual": "Prom/mes", "Días sin venta": "Sin venta"})
         if "Tienda" in vista:
             vista["Tienda"] = vista["Tienda"].astype(str).str.replace(r"^CTF\s+", "", regex=True).str.title()
-        COLOR_ESTADO = {"Quiebre": ("#fbdcdc", "#b42323"), "Reponer": ("#fdefc8", "#8a5a00"),
-                        "OK": ("#d7f2dc", "#11713a"), "Sobre stock": ("#e9e0fb", "#5b2d8e"),
-                        "Sin rotación": ("#e9edf2", "#4b5563")}
+        _osc = tema.actual()["clave_estado"] == "oscuro"
+        COLOR_ESTADO = ({"Quiebre": ("#3a1618", "#f08a8a"), "Reponer": ("#33280a", "#fab219"),
+                         "OK": ("#12301a", "#4ccf6a"), "Sobre stock": ("#2a1f45", "#c4b5fd"),
+                         "Sin rotación": ("#232a36", "#aab3c0")} if _osc else
+                        {"Quiebre": ("#fbdcdc", "#b42323"), "Reponer": ("#fdefc8", "#8a5a00"),
+                         "OK": ("#d7f2dc", "#11713a"), "Sobre stock": ("#e9e0fb", "#5b2d8e"),
+                         "Sin rotación": ("#e9edf2", "#4b5563")})
+        C_ROJO, C_VERDE, C_GRIS = (("#f08a8a", "#4ccf6a", "#98a1af") if _osc
+                                   else ("#b42323", "#11713a", "#6b7280"))
 
         def _pinta_estado(x):
             f, c = COLOR_ESTADO.get(x, ("", ""))
@@ -1249,7 +1148,7 @@ def vista_stock() -> None:
             except (TypeError, ValueError):
                 return "—"
 
-        enteros = ["Disp.", "Tráns.", "Bloq.", "Vend. hoy", "Stock act.", "Vend. mes",
+        enteros = ["Disp.", "Tráns.", "Bloq.", "Stock act.", "Vend. mes",
                    "En tienda", "Retiro", "Deliv.", "Salidas"]
         vista["Sin venta"] = ["—" if pd.isna(x) else f"{int(x)} d"
                               for x in pd.to_numeric(vista["Sin venta"], errors="coerce")]
@@ -1269,7 +1168,6 @@ def vista_stock() -> None:
                .map(_pinta_estado, subset=["Estado"])
                .map(lambda x: "background-color:#e6eefb;color:#10233f;font-weight:800", subset=["Stock act."])
                .map(lambda x: "color:#b42323;font-weight:700" if x and x > 0 else "", subset=["Bloq."])
-               .map(lambda x: "color:#11713a;font-weight:700" if x and x > 0 else "", subset=["Vend. hoy"])
                .map(lambda x: "color:#0e7490" if x and x > 0 else "", subset=["Tráns."])
                .map(lambda x: "text-align:right;color:#9aa3af" if x == "—" else "text-align:right",
                     subset=["Cobertura"]))
@@ -1278,7 +1176,6 @@ def vista_stock() -> None:
             "Disp.": "Disponible: stock libre según SAP el día del reporte.",
             "Tráns.": "En tránsito: unidades que vienen en camino a la tienda.",
             "Bloq.": "Bloqueado: stock que no se puede vender.",
-            "Vend. hoy": "Vendido hoy según Bsale (se descuenta del disponible).",
             "Stock act.": "Stock actual = disponible − vendido hoy.",
             "Vend. mes": "Unidades que salieron en el mes en curso (todos los canales).",
             "En tienda": f"Vendido por los ejecutivos en la tienda en los últimos {dias_vent} días.",
@@ -1301,7 +1198,7 @@ def vista_stock() -> None:
             ("Producto", "#475569", [("Tienda", "Tienda", ""), ("SKU", "SKU", ""),
                                      ("Descripción", "Descripción", ""), ("Categoría", "Categoría", "")]),
             ("📦 Stock hoy", "#0e7490", [("Disp.", "Disponible", "SAP"), ("Tráns.", "En", "tránsito"),
-                                        ("Bloq.", "Bloqueado", ""), ("Vend. hoy", "Vendido", "hoy"),
+                                        ("Bloq.", "Bloqueado", ""), 
                                         ("Stock act.", "Stock", "actual")]),
             (f"🛒 Salidas últimos {dias_vent} días", "#3f8f3a",
              [("En tienda", "Venta", "en tienda"), ("Retiro", "Retiro", "en tienda"),
@@ -1348,7 +1245,7 @@ def vista_stock() -> None:
                 if col == "Stock act.":
                     return f'<td class="n sa">{txt}</td>'
                 if col == "Bloq." and val:
-                    return f'<td class="n" style="color:#b42323;font-weight:700">{txt}</td>'
+                    return f'<td class="n" style="color:{C_ROJO};font-weight:700">{txt}</td>'
                 if col == "Vend. hoy" and val:
                     return f'<td class="n" style="color:#11713a;font-weight:700">{txt}</td>'
                 if col in ("Salidas",):
@@ -1359,11 +1256,11 @@ def vista_stock() -> None:
             if col == "Venta/día":
                 return f'<td class="n">{float(val):.2f}</td>'.replace(".", ",")
             if col == "Estado":
-                f_, c_ = COLOR_ESTADO.get(val, ("", "#9aa3af"))
+                f_, c_ = COLOR_ESTADO.get(val, ("", C_GRIS))
                 return (f'<td class="est" style="background:{f_};color:{c_}">{h(str(val))}</td>' if f_
-                        else f'<td class="est" style="color:#9aa3af">{h(str(val))}</td>')
+                        else f'<td class="est" style="color:{C_GRIS}">{h(str(val))}</td>')
             if col == "Tendencia":
-                color = "#11713a" if str(val).startswith("▲") else "#b42323" if str(val).startswith("▼") else "#6b7280"
+                color = C_VERDE if str(val).startswith("▲") else C_ROJO if str(val).startswith("▼") else C_GRIS
                 return f'<td style="color:{color};font-weight:700;white-space:nowrap">{h(str(val))}</td>'
             if col in ("Cobertura", "Sin venta"):
                 return f'<td class="n{" cero" if val == "—" else ""}">{h(str(val))}</td>'
@@ -1385,23 +1282,33 @@ def vista_stock() -> None:
         filas_html = "".join(
             "<tr>" + "".join(_cel(c, r[c]) for c, _, _, _ in cols_tab) + "</tr>"
             for _, r in vt.iterrows())
-        md("""<style>
-    .stkt { max-height:600px; overflow:auto; border-radius:12px; border:1px solid #d6dbe3; background:#fff; }
-    .stkt table { border-collapse:separate; border-spacing:0; width:100%; font-size:.76rem; color:#10233f; }
+        _t = tema.actual()
+        if _osc:
+            K = {"BG": _t["tarjeta"], "BORDE": _t["borde_fuerte"], "TXT": _t["texto"], "LINEA": _t["borde"],
+                 "CERO": "#5b6575", "SA": "#1d2b44", "HOV": _t["tarjeta2"], "SAH": "#24375a"}
+        else:
+            K = {"BG": "#fff", "BORDE": "#d6dbe3", "TXT": "#10233f", "LINEA": "#edf0f4",
+                 "CERO": "#b8c0cc", "SA": "#e6eefb", "HOV": "#f4f7fb", "SAH": "#d8e5fa"}
+        _css = """<style>
+    .stkt { max-height:600px; overflow:auto; border-radius:12px; border:1px solid @BORDE; background:@BG; }
+    .stkt table { border-collapse:separate; border-spacing:0; width:100%; font-size:.76rem; color:@TXT; }
     .stkt thead th { position:sticky; z-index:2; color:#fff; text-align:center; padding:.28rem .3rem;
       border-right:1px solid rgba(255,255,255,.25); line-height:1.15; }
     .stkt thead tr:first-child th { top:0; font-size:.74rem; letter-spacing:.03em; text-transform:uppercase; }
     .stkt thead tr:nth-child(2) th { top:1.55rem; font-size:.72rem; font-weight:700; cursor:help; }
     .stkt thead th span { font-weight:500; opacity:.85; font-size:.66rem; }
-    .stkt td { padding:.16rem .35rem; border-bottom:1px solid #edf0f4; white-space:nowrap; }
+    .stkt td { padding:.16rem .35rem; border-bottom:1px solid @LINEA; white-space:nowrap; background:@BG; }
     .stkt td.n { text-align:right; font-variant-numeric:tabular-nums; }
-    .stkt td.cero { color:#b8c0cc; }
-    .stkt td.sa { background:#e6eefb; font-weight:800; text-align:right; }
+    .stkt td.cero { color:@CERO; }
+    .stkt td.sa { background:@SA; font-weight:800; text-align:right; }
     .stkt td.desc { white-space:normal; min-width:180px; }
     .stkt td.est { font-weight:800; text-align:center; }
-    .stkt tbody tr:hover td { background:#f4f7fb; }
-    .stkt tbody tr:hover td.sa { background:#d8e5fa; }
-    </style>""")
+    .stkt tbody tr:hover td { background:@HOV; }
+    .stkt tbody tr:hover td.sa { background:@SAH; }
+    </style>"""
+        for _k, _v in K.items():
+            _css = _css.replace("@" + _k, _v)
+        md(_css)
         md(f'<div class="stkt"><table><thead><tr>{th1}</tr><tr>{th2}</tr></thead>'
            f'<tbody>{filas_html}</tbody></table></div>')
         if total_filas > LIMITE:
@@ -2026,7 +1933,7 @@ def sincronizar_drive(forzar: bool = False) -> dict | None:
 
 
 def aviso_drive(estado) -> None:
-    c1, c2 = st.columns([6, 1.3])
+    c1 = st.container()                  # (se quitó el botón «Traer de Drive»: se revisa sola)
     with c1:
         if estado is None:
             md('<div class="seccion-sub">☁️ Sin conexión al Drive (falta <b>gcp_json</b> en '
@@ -2039,61 +1946,11 @@ def aviso_drive(estado) -> None:
                f'{estado.get("archivos", 0)} archivos · revisada {h(estado.get("revisado", ""))}'
                + (f' · <b>{estado["nuevos"]} nuevos</b>' if estado.get("nuevos") else "")
                + '. Se revisa sola cada 5 minutos.</div>')
-    with c2:
-        if estado is not None and st.button("🔄 Traer de Drive", key="drive_ya",
-                                             help="Revisa la carpeta ahora mismo"):
-            sincronizar_drive(forzar=True)
-            st.rerun()
 
 
 def _bloque_bsale() -> None:
-    """Venta del día de Bsale (se descuenta del stock) y la dotación (tienda de cada vendedor)."""
-    info = _info_bsale()
-    v = _vendedores()
-    with desplegable("🧾 Venta del día (Bsale) y dotación", expanded=False):
-        if info:
-            md(f'<div class="seccion-sub">Bsale cargado: <b>{h(info.get("archivo", ""))}</b> · '
-               f'última venta <b>{h(info.get("ultima_venta", "—"))}</b> · '
-               f'{num(info.get("lineas", 0))} líneas · cargado {h(info.get("subido", ""))}. '
-               'Se usa el más nuevo entre lo que se sube acá, la carpeta del Drive y el panel '
-               '(🎯 Meta del día).</div>')
-        else:
-            md('<div class="seccion-sub t-medio">Todavía no hay venta de Bsale: el stock actual '
-               'queda igual al disponible de SAP.</div>')
-        md('<div class="seccion-sub">En Bsale: <b>Reportes → Detalle de ventas</b>, del día.</div>')
-        subido = st.file_uploader("Detalle de ventas de Bsale", type=["xls", "xlsx", "html", "htm"],
-                                  key="bsale_subir", label_visibility="collapsed")
-        if subido is not None:
-            firma = f"{subido.name}·{subido.size}"
-            if st.session_state.get("bsale_firma") != firma:
-                ok, mensaje = _guardar_bsale(subido.getvalue(), subido.name)
-                st.session_state["bsale_firma"] = firma
-                st.session_state["bsale_msg"] = ("✅ " if ok else "❌ ") + mensaje
-                if ok:
-                    st.session_state["aviso_respaldo"] = respaldar_en_drive()
-                    st.cache_data.clear()
-                st.rerun()
-        if st.session_state.get("bsale_msg"):
-            md(f'<div class="seccion-sub">{h(st.session_state.pop("bsale_msg"))}</div>')
-        md(f'<div class="seccion-sub" style="margin-top:.6rem">Dotación: <b>{len(v)}</b> personas con '
-           'código CMA_ (sale de la DOTACIÓN de la carpeta del Drive). Sirve para saber de qué '
-           'tienda es cada vendedor de Bsale. Si cambió, súbela acá o en el Drive.</div>')
-        dot = st.file_uploader("DOTACIÓN", type=["xlsx", "xls"], key="dota_subir",
-                               label_visibility="collapsed")
-        if dot is not None:
-            firma = f"{dot.name}·{dot.size}"
-            if st.session_state.get("dota_firma") != firma:
-                st.session_state["dota_firma"] = firma
-                try:
-                    nueva = _leer_dotacion(dot.getvalue())
-                    nueva.to_csv(VENDEDORES, index=False, encoding="utf-8")
-                    st.session_state["bsale_msg"] = f"✅ Dotación: {len(nueva)} personas."
-                    st.session_state["aviso_respaldo"] = respaldar_en_drive()
-                    st.cache_data.clear()
-                except Exception as e:                      # noqa: BLE001
-                    st.session_state["bsale_msg"] = f"❌ {dot.name}: {e}"
-                st.rerun()
-        _aviso_respaldo()
+    """Ya no se muestra: Bsale y dotación llegan solos desde el Drive y el respaldo del panel."""
+    return
 
 
 def _memoria_mb() -> int:
@@ -2109,8 +1966,13 @@ def _memoria_mb() -> int:
 # ---------------------------------------------------------------------------
 # La página
 # ---------------------------------------------------------------------------
-ui.cabecera(BASE / "assets" / "logo.png", "Stock CTF",
-            "Stock y rotación de las seis tiendas")
+_cab, _btn = st.columns([6, 1.1])
+with _cab:
+    ui.cabecera(BASE / "assets" / "logo.png", "Stock CTF",
+                "Stock y rotación de las seis tiendas")
+with _btn:
+    md('<div style="height:1.1rem"></div>')
+    tema.interruptor()
 aviso_drive(sincronizar_drive())
 vista_stock()
 

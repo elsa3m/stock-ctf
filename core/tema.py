@@ -57,7 +57,7 @@ TEMAS = {
 
 
 # Con qué contraste abre el panel. El botón de arriba a la derecha lo cambia.
-TEMA_POR_DEFECTO = "claro"
+TEMA_POR_DEFECTO = "oscuro"
 
 
 def actual() -> dict:
@@ -355,6 +355,15 @@ span[data-baseweb="tag"] {{
 }}
 span[data-baseweb="tag"] span, span[data-baseweb="tag"] svg {{ color:#fff !important; fill:#fff !important; }}
 [data-testid="stCheckbox"] p {{ color:{t['texto']}; font-weight:600; }}
+/* cajas de texto (búsqueda) */
+div[data-baseweb="input"], div[data-baseweb="input"] > div, div[data-baseweb="base-input"] {{
+  background:{t['tarjeta']} !important; border-color:{t['borde_fuerte']} !important;
+}}
+div[data-baseweb="input"] input {{ color:{t['texto']} !important; -webkit-text-fill-color:{t['texto']}; }}
+div[data-baseweb="input"] input::placeholder {{ color:{t['texto3']} !important; -webkit-text-fill-color:{t['texto3']}; }}
+div[data-baseweb="popover"] ul, div[data-baseweb="popover"] [role="listbox"] {{ background:{t['tarjeta']} !important; }}
+[data-testid="stCaptionContainer"], .stCaption {{ color:{t['texto3']} !important; }}
+[data-testid="stMarkdownContainer"] {{ color:{t['texto']}; }}
 
 .pie-pagina {{ text-align:center; color:{t['texto3']}; font-size:.85rem; margin-top:1.5rem; }}
 
@@ -390,13 +399,24 @@ def inyectar():
     st.markdown(css(), unsafe_allow_html=True)
 
 
+def iniciar() -> None:
+    """
+    Tema de esta sesión. La preferencia queda en la dirección de la página
+    (?tema=claro): al recargar o guardar el enlace en favoritos se mantiene.
+    """
+    if "tema" not in st.session_state:
+        pedido = str(st.query_params.get("tema", "")).lower()
+        st.session_state["tema"] = pedido if pedido in TEMAS else TEMA_POR_DEFECTO
+
+
 def interruptor():
     """Botón claro / oscuro. Devuelve el tema elegido."""
-    if "tema" not in st.session_state:
-        st.session_state["tema"] = TEMA_POR_DEFECTO
+    iniciar()
     actual_ = st.session_state["tema"]
     etiqueta = "🌙 Modo oscuro" if actual_ == "claro" else "☀️ Modo claro"
     if st.button(etiqueta, key="btn_tema", help="Cambia entre fondo claro y oscuro"):
-        st.session_state["tema"] = "oscuro" if actual_ == "claro" else "claro"
+        nuevo = "oscuro" if actual_ == "claro" else "claro"
+        st.session_state["tema"] = nuevo
+        st.query_params["tema"] = nuevo
         st.rerun()
     return st.session_state["tema"]
