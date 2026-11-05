@@ -1154,7 +1154,7 @@ def vista_stock() -> None:
     _pintar_calendario()
     c0, c1, c2, c3 = st.columns([0.55, 2.2, 1.3, 1.1])   # fecha angosta; más espacio a tiendas
     with c0:
-        elegida = st.date_input("Stock del día", fechas[-1], format="DD/MM/YYYY",
+        elegida = st.date_input("Stock del día", _hoy_chile(), format="DD/MM/YYYY",   # abre en hoy
                                 key="stk_fecha_cal")
     # si ese día no se cargó stock, se usa el último cargado antes de esa fecha
     previas = [f for f in fechas if f <= elegida]
