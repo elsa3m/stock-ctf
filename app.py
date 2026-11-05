@@ -1325,7 +1325,7 @@ def vista_stock() -> None:
         _tabla_stock_hoy(d, fecha)
 
     # ── detalle por SKU ─────────────────────────────────────────────────────
-    with desplegable("📋 Detalle por producto", expanded=False):  # parte cerrado
+    with desplegable("📋 Detalle por producto (solo para uso de gestión)", expanded=False):  # parte cerrado
         ui.seccion("Detalle por producto",
                    "Ordenado de la A a la Z por tienda, tipo de producto y SKU. Haz clic en "
                    "cualquier columna para ordenar por ella; el filtro de estado sirve para ver solo "
