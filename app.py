@@ -97,7 +97,7 @@ def _entrada() -> None:
     ui.cabecera(BASE / "assets" / "logo.png", "Stock CTF", "Uso interno de CTF TECNOLOGÍA SPA")
     ui.seccion("🔒 Acceso", "Escribe la clave CTF.")
     escrita = st.text_input("Clave", type="password", key="pide_clave",
-                            label_visibility="collapsed", placeholder="Clave CTF")
+                            label_visibility="collapsed", placeholder="Escribe aquí")
     if escrita and escrita == clave:
         st.session_state["stock_abierto"] = True
         st.rerun()
