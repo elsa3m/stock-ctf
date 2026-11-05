@@ -673,7 +673,13 @@ def _guardar_stock(archivos) -> list[str]:
         alm = ", ".join(sorted(d["almacen"].unique()))
         mensajes.append(f"✅ {a.name}: {len(d)} SKU · almacén {alm} · {fecha:%d/%m/%Y}")
     for fecha, partes in por_dia.items():
-        nuevo = pd.concat(partes, ignore_index=True)
+        # si dos archivos traen el mismo almacén, manda el último (no se suman dos veces)
+        vistos, limpias = set(), []
+        for x in reversed(partes):
+            x = x[~x["almacen"].isin(vistos)]
+            vistos |= set(x["almacen"].unique())
+            limpias.append(x)
+        nuevo = pd.concat(limpias[::-1], ignore_index=True).drop_duplicates()
         ruta = STOCK_DIR / f"stock_{fecha:%Y-%m-%d}.csv"
         if ruta.exists():
             viejo = pd.read_csv(ruta, dtype={"sku": str, "almacen": str})
@@ -700,6 +706,7 @@ def _stock_del_dia(ruta: str, mtime: float) -> pd.DataFrame:
     for c in ("disponible", "transito", "bloqueado"):
         d[c] = pd.to_numeric(d[c], errors="coerce").fillna(0)
     d["sku"] = d["sku"].map(_sku_txt)
+    d = d.drop_duplicates().reset_index(drop=True)      # filas repetidas de cargas anteriores
     d["pdv"] = d["almacen"].map(ALMACEN_PDV).fillna(d["almacen"])
     cls = [_clasifica_sku(s, x) for s, x in zip(d["sku"], d["descripcion"])]
     d["clase"] = [c[0] for c in cls]
@@ -827,6 +834,7 @@ def _salidas_bases(r_eq: str, m_eq: float, r_acc: str, m_acc: float, hasta: str)
         columns=["pdv", "sku", "fecha", "canal", "fuente", "q", "orden"])
 
 
+@st.cache_data(show_spinner=False, max_entries=8, ttl=3600)   # compartido entre usuarios
 def _excel_stock(hojas: dict) -> bytes:
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as w:
@@ -1003,7 +1011,7 @@ def _css_stkt() -> str:
 
 def _tabla_stock_hoy(d: pd.DataFrame, fecha) -> None:
     """Solo el stock de hoy por tienda y producto, sin rotación."""
-    LIMITE = 1500
+    LIMITE = 600
     v = d.copy()
     v["_t"] = v["tienda"].map(fuentes.norm)
     v = v.sort_values(["_t", "tipo", "sku"], kind="stable")
@@ -1065,20 +1073,41 @@ def _tabla_stock_hoy(d: pd.DataFrame, fecha) -> None:
                            key="stk_hoy_xlsx")
     filtros = (f"Stock SAP del {fecha:%d/%m/%Y} · {len(xls)} filas · "
                f"Tiendas: {', '.join(sorted(set(xls['Tienda'])))}")
+    # el PDF y la imagen se arman solo cuando se piden (antes se armaban en cada clic y la app tardaba)
+    firma = f"{fecha}|{len(xls)}|{int(xls['Stock actual'].sum())}|{filtros}"
+    if st.session_state.get("stk_hoy_firma") != firma:
+        st.session_state["stk_hoy_firma"] = firma
+        st.session_state.pop("stk_hoy_pdf_b", None)
+        st.session_state.pop("stk_hoy_png_b", None)
+    MAX_IMG = 400
     with b2:
-        try:
-            st.download_button("⬇️ PDF", _pdf_stock_hoy(xls, filtros),
+        if st.session_state.get("stk_hoy_pdf_b"):
+            st.download_button("⬇️ Bajar PDF", st.session_state["stk_hoy_pdf_b"],
                                file_name=f"stock_hoy_{fecha:%Y-%m-%d}.pdf", mime="application/pdf",
                                key="stk_hoy_pdf")
-        except Exception as e:                                  # noqa: BLE001
-            st.caption(f"No pude armar el PDF: {e}")
+        elif st.button("📄 PDF", key="stk_hoy_pdf_prep", help="Arma el PDF con lo filtrado"):
+            try:
+                with st.spinner("Armando el PDF…"):
+                    st.session_state["stk_hoy_pdf_b"] = _pdf_stock_hoy(xls, filtros)
+                st.rerun()
+            except Exception as e:                              # noqa: BLE001
+                st.caption(f"No pude armar el PDF: {e}")
     with b3:
-        try:
-            st.download_button("⬇️ Imagen", _png_stock_hoy(xls.head(LIMITE), filtros),
+        if st.session_state.get("stk_hoy_png_b"):
+            st.download_button("⬇️ Bajar imagen", st.session_state["stk_hoy_png_b"],
                                file_name=f"stock_hoy_{fecha:%Y-%m-%d}.png", mime="image/png",
                                key="stk_hoy_png")
-        except Exception as e:                                  # noqa: BLE001
-            st.caption(f"No pude armar la imagen: {e}")
+        elif st.button("🖼️ Imagen", key="stk_hoy_png_prep",
+                       help=f"Arma una imagen con lo filtrado (hasta {MAX_IMG} filas)"):
+            try:
+                with st.spinner("Armando la imagen…"):
+                    st.session_state["stk_hoy_png_b"] = _png_stock_hoy(xls.head(MAX_IMG), filtros)
+                st.rerun()
+            except Exception as e:                              # noqa: BLE001
+                st.caption(f"No pude armar la imagen: {e}")
+    if len(xls) > MAX_IMG:
+        md(f'<div class="seccion-sub" style="font-size:.74rem">La imagen lleva las primeras {MAX_IMG} '
+           'filas: filtra por tienda o categoría para que salga completa.</div>')
 
 
 def desplegable_historial() -> None:
@@ -1170,8 +1199,9 @@ def vista_stock() -> None:
     pdvs = [p for p in TIENDAS["pdv"] if p in set(s["pdv"])] + \
            sorted(set(s["pdv"]) - set(TIENDAS["pdv"]))
     with c1:
-        tiendas = st.multiselect("Tienda", pdvs, default=pdvs, key="stk_tienda",
-                                 format_func=lambda p: NOMBRE_TIENDA.get(p, p))
+        tiendas = st.multiselect("Tienda", pdvs, default=[], key="stk_tienda",
+                                 format_func=lambda p: NOMBRE_TIENDA.get(p, p),
+                                 placeholder="Elige tu tienda")
     with c2:
         tipos = st.multiselect("Tipo de producto", ["Equipos", "Accesorios", "SIM cards"],
                                default=["Equipos", "Accesorios", "SIM cards"], key="stk_tipo")
@@ -1188,6 +1218,10 @@ def vista_stock() -> None:
         buscar = st.text_input("SKU o descripción", key="stk_buscar",
                                placeholder="Ej: 108421 o IPHONE 17")
     agrupar = "Por tienda"   # siempre detalle por tienda (se quitó el selector «Ver»)
+    if not tiendas:          # parte sin tienda elegida: así abre rápido aunque entren varios a la vez
+        st.info("👆 Elige tu tienda (o varias) en el filtro **Tienda** para ver su stock.")
+        desplegable_cargar_stock(fechas)
+        return
     if cat_sel:
         base = base[base["categoria"].isin(cat_sel)]
     if buscar.strip():
@@ -1329,6 +1363,9 @@ def vista_stock() -> None:
 
     # ── detalle por SKU ─────────────────────────────────────────────────────
     with desplegable("📋 Detalle por producto (solo para uso de gestión)", expanded=False):  # parte cerrado
+        if not st.toggle("Mostrar el detalle", key="stk_det_ver",
+                         help="Se arma solo cuando lo activas, para que la app abra rápido"):
+            return
         ui.seccion("Detalle por producto",
                    "Ordenado de la A a la Z por tienda, tipo de producto y SKU. Haz clic en "
                    "cualquier columna para ordenar por ella; el filtro de estado sirve para ver solo "
