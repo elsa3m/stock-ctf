@@ -57,11 +57,11 @@ class fuentes:                                   # lo único que se usa de core/
         return " ".join(s.upper().split())
 
 
-# las seis tiendas, en el orden de siempre
+# las ocho tiendas, en el orden de siempre
 TIENDAS = pd.DataFrame({
-    "pdv": ["5003", "5541", "5245", "5543", "5542", "5544"],
+    "pdv": ["5003", "5541", "5245", "5543", "5542", "5544", "E394", "E396"],
     "tienda": ["Gilberto Fuenzalida", "Open Rancagua", "Arauco Maipú", "Parque Arauco",
-               "Arauco Quilicura", "Peñalolén"],
+               "Arauco Quilicura", "Peñalolén", "Los Dominicos", "Plaza Oeste"],
 })
 NOMBRE_TIENDA = dict(zip(TIENDAS["pdv"], TIENDAS["tienda"]))
 MESES_NOMBRE = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto",
@@ -1116,17 +1116,11 @@ def desplegable_historial() -> None:
             st.caption("Todavía no hay historial cargado: la rotación usa solo el mes en curso.")
 
 
-def vista_stock() -> None:
-    _t = tema.actual()
-    md(_css_tablas_claras() + CSS_STOCK)
-    ui.seccion("📦 Stock",
-               "Stock de cada tienda (SAP) menos lo vendido hoy en Bsale, y la rotación del mes "
-               "de cada producto contra el stock que queda.")
-    fechas = _fechas_stock()
-
+def desplegable_cargar_stock(fechas) -> None:
+    """Subir los reportes de stock del día (va después de Stock hoy)."""
     with desplegable("📥 Cargar stock del día", expanded=not fechas):
-        md('<div class="seccion-sub">Sube el <b>Reporte Stock Disponible</b> de cada tienda (los '
-           'seis juntos o de a uno). La fecha se toma del nombre del archivo '
+        md('<div class="seccion-sub">Sube el <b>Reporte Stock Disponible</b> de cada tienda (las '
+           'ocho juntas o de a una). La fecha se toma del nombre del archivo '
            '(<i>Reporte_Stock_Disponible_2026-09-29</i>); si no la trae, se usa la de hoy. '
            'Subir de nuevo una tienda el mismo día reemplaza solo esa tienda.</div>')
         subidos = st.file_uploader("Reporte Stock Disponible", type=["xlsx", "xls"],
@@ -1142,12 +1136,20 @@ def vista_stock() -> None:
                 st.rerun()
         _aviso_respaldo()
 
+
+def vista_stock() -> None:
+    _t = tema.actual()
+    md(_css_tablas_claras() + CSS_STOCK)
+    ui.seccion("📦 Stock")
+    fechas = _fechas_stock()
+
     hist = _hist_cargado()
 
     _bloque_bsale()
 
     if not fechas:
-        st.info("Todavía no hay stock cargado. Sube los reportes de stock arriba.")
+        st.info("Todavía no hay stock cargado. Sube los reportes de stock aquí abajo.")
+        desplegable_cargar_stock(fechas)
         return
 
     # ── filtros ─────────────────────────────────────────────────────────────
@@ -1288,6 +1290,7 @@ def vista_stock() -> None:
 
     if d.empty:
         st.info("No hay productos con esos filtros.")
+        desplegable_cargar_stock(fechas)
         return
 
     # ── resumen por tienda ──────────────────────────────────────────────────
@@ -1320,9 +1323,9 @@ def vista_stock() -> None:
     total = _fila_res(d, "<b>Total</b>")
     # ── stock hoy (sin rotación) ────────────────────────────────────────────
     with desplegable("📦 Stock hoy", expanded=True):
-        md('<div class="seccion-sub">Stock de cada tienda y producto, ordenado de la A a la Z '
-           'por tienda, tipo de producto y SKU. Usa los filtros de arriba para acotar.</div>')
         _tabla_stock_hoy(d, fecha)
+
+    desplegable_cargar_stock(fechas)
 
     # ── detalle por SKU ─────────────────────────────────────────────────────
     with desplegable("📋 Detalle por producto (solo para uso de gestión)", expanded=False):  # parte cerrado
