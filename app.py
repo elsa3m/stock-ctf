@@ -841,6 +841,135 @@ def _excel_stock(hojas: dict) -> bytes:
     return buf.getvalue()
 
 
+@st.cache_data(show_spinner=False, max_entries=4)
+def _pdf_stock_hoy(df: pd.DataFrame, filtros: str) -> bytes:
+    """PDF A4 vertical de la tabla Stock hoy (con su fila de total)."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=9 * mm, rightMargin=9 * mm,
+                            topMargin=9 * mm, bottomMargin=9 * mm, title="Stock hoy CTF", author="Stock CTF")
+    azul, teal = colors.HexColor("#1F3B63"), colors.HexColor("#0e7490")
+    t_tit = ParagraphStyle("t", fontName="Helvetica-Bold", fontSize=14, textColor=azul)
+    t_sub = ParagraphStyle("s", fontName="Helvetica", fontSize=7.5, textColor=colors.HexColor("#4b5563"),
+                           leading=9.5)
+    celda = ParagraphStyle("c", fontName="Helvetica", fontSize=7, leading=8.4)
+    celda_h = ParagraphStyle("ch", fontName="Helvetica-Bold", fontSize=7, leading=8.4,
+                             textColor=colors.white, alignment=1)
+    partes = []
+    logo = BASE / "assets" / "logo.png"
+    tit = Paragraph("Stock hoy · CTF", t_tit)
+    if logo.exists():
+        partes.append(Table([[tit, Image(str(logo), width=30 * mm, height=10 * mm)]],
+                            colWidths=[160 * mm, 32 * mm],
+                            style=[("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                                   ("ALIGN", (1, 0), (1, 0), "RIGHT")]))
+    else:
+        partes.append(tit)
+    partes += [Paragraph(h(filtros) + f" · Generado {_ahora_chile():%d/%m/%Y %H:%M}", t_sub),
+               Spacer(1, 4)]
+    nums = ["Disponible SAP", "En tránsito", "Bloqueado", "Stock actual"]
+    m = lambda x: f"{float(x):,.0f}".replace(",", ".")
+    filas = [[Paragraph(h(c), celda_h) for c in df.columns]]
+    for _, r in df.iterrows():
+        filas.append([Paragraph(h(str(r[c])), celda) for c in df.columns[:4]] + [m(r[c]) for c in nums])
+    filas.append(["Total", "", "", ""] + [m(df[c].sum()) for c in nums])
+    n = len(filas) - 1
+    t = Table(filas, colWidths=[30 * mm, 20 * mm, 66 * mm, 24 * mm] + [13 * mm] * 4, repeatRows=1)
+    est = [("BACKGROUND", (0, 0), (3, 0), colors.HexColor("#475569")),
+           ("BACKGROUND", (4, 0), (-1, 0), teal),
+           ("FONTNAME", (0, 1), (-1, -1), "Helvetica"), ("FONTSIZE", (0, 1), (-1, -1), 7),
+           ("ALIGN", (4, 1), (-1, -1), "RIGHT"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+           ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#d5dde8")),
+           ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f4f7fb")]),
+           ("BACKGROUND", (7, 1), (7, -1), colors.HexColor("#e6eefb")),
+           ("FONTNAME", (7, 1), (7, -1), "Helvetica-Bold"),
+           ("BACKGROUND", (0, n), (-1, n), colors.HexColor("#e8eef7")),
+           ("FONTNAME", (0, n), (-1, n), "Helvetica-Bold"), ("SPAN", (0, n), (3, n)),
+           ("TOPPADDING", (0, 0), (-1, -1), 1.6), ("BOTTOMPADDING", (0, 0), (-1, -1), 1.6)]
+    for i, x in enumerate(df["Bloqueado"].tolist(), start=1):
+        if x:
+            est += [("TEXTCOLOR", (6, i), (6, i), colors.HexColor("#b42323")),
+                    ("FONTNAME", (6, i), (6, i), "Helvetica-Bold")]
+    t.setStyle(TableStyle(est))
+    partes.append(t)
+    doc.build(partes)
+    return buf.getvalue()
+
+
+@st.cache_data(show_spinner=False, max_entries=4)
+def _png_stock_hoy(df: pd.DataFrame, filtros: str) -> bytes:
+    """Imagen PNG de la tabla Stock hoy, lista para compartir (WhatsApp, correo)."""
+    from PIL import Image as PImg, ImageDraw, ImageFont
+
+    def fuente(tam, negrita=False):
+        nombres = (["DejaVuSans-Bold.ttf", "arialbd.ttf"] if negrita else ["DejaVuSans.ttf", "arial.ttf"])
+        for nm in nombres:
+            for base in ("", "/usr/share/fonts/truetype/dejavu/"):
+                try:
+                    return ImageFont.truetype(base + nm, tam)
+                except OSError:
+                    pass
+        try:
+            return ImageFont.load_default(size=tam)
+        except TypeError:
+            return ImageFont.load_default()
+
+    E = 2                                       # escala (nitidez)
+    f, fb, ft, fs = fuente(13 * E), fuente(13 * E, True), fuente(20 * E, True), fuente(11 * E)
+    nums = ["Disponible SAP", "En tránsito", "Bloqueado", "Stock actual"]
+    anchos = [170, 110, 380, 120, 110, 95, 95, 95]
+    anchos = [a * E for a in anchos]
+    alto_f, alto_h, mx = 26 * E, 34 * E, 16 * E
+    m = lambda x: f"{float(x):,.0f}".replace(",", ".")
+    filas = [[str(r[c]) for c in df.columns[:4]] + [m(r[c]) for c in nums] for _, r in df.iterrows()]
+    filas.append(["Total", "", "", ""] + [m(df[c].sum()) for c in nums])
+    W = sum(anchos) + 2 * mx
+    top = 70 * E
+    H = top + alto_h + alto_f * len(filas) + mx
+    img = PImg.new("RGB", (W, H), "white")
+    dr = ImageDraw.Draw(img)
+    dr.text((mx, 12 * E), "Stock hoy · CTF", font=ft, fill="#1F3B63")
+    dr.text((mx, 42 * E), filtros + f" · Generado {_ahora_chile():%d/%m/%Y %H:%M}", font=fs, fill="#4b5563")
+    x = mx
+    for i, c in enumerate(df.columns):
+        dr.rectangle([x, top, x + anchos[i], top + alto_h], fill="#475569" if i < 4 else "#0e7490")
+        tw = dr.textlength(c, font=fb)
+        dr.text((x + (anchos[i] - tw) / 2, top + (alto_h - 13 * E) / 2 - E), c, font=fb, fill="white")
+        x += anchos[i]
+    y = top + alto_h
+    for k, fila in enumerate(filas):
+        total = k == len(filas) - 1
+        fondo = "#e8eef7" if total else ("#ffffff" if k % 2 == 0 else "#f4f7fb")
+        dr.rectangle([mx, y, W - mx, y + alto_f], fill=fondo)
+        x = mx
+        for i, val in enumerate(fila):
+            if i == 7 and not total:
+                dr.rectangle([x, y, x + anchos[i], y + alto_f], fill="#e6eefb")
+            negra = total or i == 7
+            color = "#10233f"
+            if i in (4, 5, 6) and val == "0" and not total:
+                color = "#b8c0cc"
+            if i == 6 and val != "0" and not total:
+                color, negra = "#b42323", True
+            fu = fb if negra else f
+            txt = val
+            while i < 4 and txt and dr.textlength(txt, font=fu) > anchos[i] - 12 * E:
+                txt = txt[:-2] + "…"
+            tw = dr.textlength(txt, font=fu)
+            tx = x + 6 * E if i < 4 else x + anchos[i] - 8 * E - tw
+            dr.text((tx, y + (alto_f - 13 * E) / 2 - E), txt, font=fu, fill=color)
+            x += anchos[i]
+        dr.line([mx, y + alto_f, W - mx, y + alto_f], fill="#e3e8ef", width=1)
+        y += alto_f
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
+
+
 def _css_stkt() -> str:
     """Estilo de las tablas de detalle (claro u oscuro, según el tema)."""
     t_ = tema.actual()
@@ -913,8 +1042,14 @@ def _tabla_stock_hoy(d: pd.DataFrame, fecha) -> None:
     tot = ('<tr><td class="izq" colspan="4"><b>Total</b></td>'
            + "".join(f'<td class="n{" sa" if c == "actual" else ""}"><b>{_m(v[c].sum())}</b></td>'
                      for c in ("disponible", "transito", "bloqueado", "actual")) + "</tr>")
-    md(_css_stkt())
-    md(f'<div class="stkt"><table><thead><tr>{th1}</tr><tr>{th2}</tr></thead>'
+    md(_css_stkt() + """<style>
+    .stkt.grande table { font-size:.88rem; }
+    .stkt.grande td { padding:.26rem .45rem; }
+    .stkt.grande thead tr:first-child th { font-size:.8rem; }
+    .stkt.grande thead tr:nth-child(2) th { font-size:.8rem; top:1.7rem; }
+    .stkt.grande thead th span { font-size:.72rem; }
+    </style>""")
+    md(f'<div class="stkt grande"><table><thead><tr>{th1}</tr><tr>{th2}</tr></thead>'
        f'<tbody>{filas}{tot}</tbody></table></div>')
     if len(v) > LIMITE:
         md(f'<div class="seccion-sub t-medio">Se muestran {LIMITE} de {num(len(v))} filas: '
@@ -922,10 +1057,28 @@ def _tabla_stock_hoy(d: pd.DataFrame, fecha) -> None:
     xls = v[[c for c, _, _, _ in cols]].rename(columns={
         "sku": "SKU", "descripcion": "Descripción", "categoria": "Categoría", "disponible": "Disponible SAP",
         "transito": "En tránsito", "bloqueado": "Bloqueado", "actual": "Stock actual"})
-    st.download_button("⬇️ Stock hoy en Excel", _excel_stock({"Stock hoy": xls}),
-                       file_name=f"stock_hoy_{fecha:%Y-%m-%d}.xlsx",
-                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                       key="stk_hoy_xlsx")
+    b1, b2, b3, _ = st.columns([1, 1, 1, 3])
+    with b1:
+        st.download_button("⬇️ Excel", _excel_stock({"Stock hoy": xls}),
+                           file_name=f"stock_hoy_{fecha:%Y-%m-%d}.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           key="stk_hoy_xlsx")
+    filtros = (f"Stock SAP del {fecha:%d/%m/%Y} · {len(xls)} filas · "
+               f"Tiendas: {', '.join(sorted(set(xls['Tienda'])))}")
+    with b2:
+        try:
+            st.download_button("⬇️ PDF", _pdf_stock_hoy(xls, filtros),
+                               file_name=f"stock_hoy_{fecha:%Y-%m-%d}.pdf", mime="application/pdf",
+                               key="stk_hoy_pdf")
+        except Exception as e:                                  # noqa: BLE001
+            st.caption(f"No pude armar el PDF: {e}")
+    with b3:
+        try:
+            st.download_button("⬇️ Imagen", _png_stock_hoy(xls.head(LIMITE), filtros),
+                               file_name=f"stock_hoy_{fecha:%Y-%m-%d}.png", mime="image/png",
+                               key="stk_hoy_png")
+        except Exception as e:                                  # noqa: BLE001
+            st.caption(f"No pude armar la imagen: {e}")
 
 
 def desplegable_historial() -> None:
@@ -1172,7 +1325,7 @@ def vista_stock() -> None:
         _tabla_stock_hoy(d, fecha)
 
     # ── detalle por SKU ─────────────────────────────────────────────────────
-    with desplegable("📋 Detalle por producto", expanded=True):   # (v445) siempre abierto
+    with desplegable("📋 Detalle por producto", expanded=False):  # parte cerrado
         ui.seccion("Detalle por producto",
                    "Ordenado de la A a la Z por tienda, tipo de producto y SKU. Haz clic en "
                    "cualquier columna para ordenar por ella; el filtro de estado sirve para ver solo "
