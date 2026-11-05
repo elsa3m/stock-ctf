@@ -410,7 +410,7 @@ def _css_tablas_claras() -> str:
     Todas las tablas de la vista (tablas y mapas de calor) con encabezado azul
     CTF y el cuerpo en los colores del tema elegido (claro u oscuro).
     """
-    c = tema.actual()
+    c = tema.TEMAS["claro"]             # tablas siempre en claro, también en modo oscuro
     E = {k: v[c["clave_estado"]] for k, v in tema.ESTADO.items()}
     oscuro = c["clave_estado"] == "oscuro"
     fija, hover, tot = ((c["tarjeta2"], c["borde"], c["tarjeta2"]) if oscuro
@@ -841,32 +841,95 @@ def _excel_stock(hojas: dict) -> bytes:
     return buf.getvalue()
 
 
-def vista_stock() -> None:
-    _t = tema.actual()
-    md(_css_tablas_claras() + CSS_STOCK.replace("#f4f7fb", _t["tarjeta2"]).replace("#c3ccd9", _t["borde_fuerte"]))
-    ui.seccion("📦 Stock",
-               "Stock de cada tienda (SAP) menos lo vendido hoy en Bsale, y la rotación del mes "
-               "de cada producto contra el stock que queda.")
-    fechas = _fechas_stock()
+def _css_stkt() -> str:
+    """Estilo de las tablas de detalle (claro u oscuro, según el tema)."""
+    t_ = tema.actual()
+    if False:                     # las tablas van siempre en claro, también en modo oscuro
+        K = {"BG": t_["tarjeta"], "BORDE": t_["borde_fuerte"], "TXT": t_["texto"], "LINEA": t_["borde"],
+             "CERO": "#5b6575", "SA": "#1d2b44", "HOV": t_["tarjeta2"], "SAH": "#24375a"}
+    else:
+        K = {"BG": "#fff", "BORDE": "#d6dbe3", "TXT": "#10233f", "LINEA": "#edf0f4",
+             "CERO": "#b8c0cc", "SA": "#e6eefb", "HOV": "#f4f7fb", "SAH": "#d8e5fa"}
+    _css = """<style>
+    .stkt { max-height:600px; overflow:auto; border-radius:12px; border:1px solid @BORDE; background:@BG; }
+    .stkt table { border-collapse:separate; border-spacing:0; width:100%; font-size:.76rem; color:@TXT; }
+    .stkt thead th { position:sticky; z-index:2; color:#fff; text-align:center; padding:.28rem .3rem;
+      border-right:1px solid rgba(255,255,255,.25); line-height:1.15; }
+    .stkt thead tr:first-child th { top:0; font-size:.74rem; letter-spacing:.03em; text-transform:uppercase; }
+    .stkt thead tr:nth-child(2) th { top:1.55rem; font-size:.72rem; font-weight:700; cursor:help; }
+    .stkt thead th span { font-weight:500; opacity:.85; font-size:.66rem; }
+    .stkt td { padding:.16rem .35rem; border-bottom:1px solid @LINEA; white-space:nowrap; background:@BG; }
+    .stkt td.n { text-align:right; font-variant-numeric:tabular-nums; }
+    .stkt td.cero { color:@CERO; }
+    .stkt td.sa { background:@SA; font-weight:800; text-align:right; }
+    .stkt td.desc { white-space:normal; min-width:180px; }
+    .stkt td.est { font-weight:800; text-align:center; }
+    .stkt tbody tr:hover td { background:@HOV; }
+    .stkt tbody tr:hover td.sa { background:@SAH; }
+    </style>"""
+    for _k, _v in K.items():
+        _css = _css.replace("@" + _k, _v)
+    return _css
 
-    with desplegable("📥 Cargar stock del día", expanded=not fechas):
-        md('<div class="seccion-sub">Sube el <b>Reporte Stock Disponible</b> de cada tienda (los '
-           'seis juntos o de a uno). La fecha se toma del nombre del archivo '
-           '(<i>Reporte_Stock_Disponible_2026-09-29</i>); si no la trae, se usa la de hoy. '
-           'Subir de nuevo una tienda el mismo día reemplaza solo esa tienda.</div>')
-        subidos = st.file_uploader("Reporte Stock Disponible", type=["xlsx", "xls"],
-                                   accept_multiple_files=True, key="stock_subir",
-                                   label_visibility="collapsed")
-        if subidos:
-            firma = "|".join(f"{a.name}·{a.size}" for a in subidos)
-            if st.session_state.get("stock_firma") != firma:
-                st.session_state["stock_firma"] = firma
-                for m in _guardar_stock(subidos):
-                    md(f'<div class="seccion-sub">{h(m)}</div>')
-                st.session_state["aviso_respaldo"] = respaldar_en_drive()
-                st.rerun()
-        _aviso_respaldo()
 
+def _tabla_stock_hoy(d: pd.DataFrame, fecha) -> None:
+    """Solo el stock de hoy por tienda y producto, sin rotación."""
+    LIMITE = 1500
+    v = d.copy()
+    v["_t"] = v["tienda"].map(fuentes.norm)
+    v = v.sort_values(["_t", "tipo", "sku"], kind="stable")
+    v["Tienda"] = v["tienda"].astype(str).str.replace(r"^CTF\s+", "", regex=True).str.title()
+    cols = [("Tienda", "Tienda", "", "izq"), ("sku", "SKU", "", "izq"),
+            ("descripcion", "Descripción", "", "desc"), ("categoria", "Categoría", "", "izq"),
+            ("disponible", "Disponible", "SAP", "n"), ("transito", "En", "tránsito", "n"),
+            ("bloqueado", "Bloqueado", "", "n"), ("actual", "Stock", "actual", "sa")]
+    rojo = "#b42323"                    # tablas siempre en claro
+
+    def _m(x):
+        try:
+            return f"{float(x):,.0f}".replace(",", ".")
+        except (TypeError, ValueError):
+            return "—"
+
+    def _cel(c, clase, val):
+        if clase == "izq":
+            return f'<td class="izq">{h(str(val))}</td>'
+        if clase == "desc":
+            return f'<td class="izq desc">{h(str(val))}</td>'
+        if clase == "sa":
+            return f'<td class="n sa">{_m(val)}</td>'
+        if c == "bloqueado" and val:
+            return f'<td class="n" style="color:{rojo};font-weight:700">{_m(val)}</td>'
+        return f'<td class="n{" cero" if not val else ""}">{_m(val)}</td>'
+
+    th1 = ('<th colspan="4" class="g" style="background:#475569">Producto</th>'
+           '<th colspan="4" class="g" style="background:#0e7490">📦 Stock hoy</th>')
+    th2 = "".join(f'<th class="s" style="background:{"#475569" if i < 4 else "#0e7490"}">{h(a)}'
+                  f'{f"<br><span>{h(b)}</span>" if b else ""}</th>'
+                  for i, (_, a, b, _) in enumerate(cols))
+    vt = v.head(LIMITE)
+    filas = "".join("<tr>" + "".join(_cel(c, k, r[c]) for c, _, _, k in cols) + "</tr>"
+                    for _, r in vt.iterrows())
+    tot = ('<tr><td class="izq" colspan="4"><b>Total</b></td>'
+           + "".join(f'<td class="n{" sa" if c == "actual" else ""}"><b>{_m(v[c].sum())}</b></td>'
+                     for c in ("disponible", "transito", "bloqueado", "actual")) + "</tr>")
+    md(_css_stkt())
+    md(f'<div class="stkt"><table><thead><tr>{th1}</tr><tr>{th2}</tr></thead>'
+       f'<tbody>{filas}{tot}</tbody></table></div>')
+    if len(v) > LIMITE:
+        md(f'<div class="seccion-sub t-medio">Se muestran {LIMITE} de {num(len(v))} filas: '
+           'usa los filtros de arriba o descarga el Excel para verlas todas.</div>')
+    xls = v[[c for c, _, _, _ in cols]].rename(columns={
+        "sku": "SKU", "descripcion": "Descripción", "categoria": "Categoría", "disponible": "Disponible SAP",
+        "transito": "En tránsito", "bloqueado": "Bloqueado", "actual": "Stock actual"})
+    st.download_button("⬇️ Stock hoy en Excel", _excel_stock({"Stock hoy": xls}),
+                       file_name=f"stock_hoy_{fecha:%Y-%m-%d}.xlsx",
+                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                       key="stk_hoy_xlsx")
+
+
+def desplegable_historial() -> None:
+    """Carga del historial de ventas y salidas: va al final de la página."""
     hist = _hist_cargado()
     with desplegable("📚 Historial de ventas y salidas (tienda, retiro en tienda y delivery)",
                      expanded=False):
@@ -899,6 +962,35 @@ def vista_stock() -> None:
         else:
             st.caption("Todavía no hay historial cargado: la rotación usa solo el mes en curso.")
 
+
+def vista_stock() -> None:
+    _t = tema.actual()
+    md(_css_tablas_claras() + CSS_STOCK)
+    ui.seccion("📦 Stock",
+               "Stock de cada tienda (SAP) menos lo vendido hoy en Bsale, y la rotación del mes "
+               "de cada producto contra el stock que queda.")
+    fechas = _fechas_stock()
+
+    with desplegable("📥 Cargar stock del día", expanded=not fechas):
+        md('<div class="seccion-sub">Sube el <b>Reporte Stock Disponible</b> de cada tienda (los '
+           'seis juntos o de a uno). La fecha se toma del nombre del archivo '
+           '(<i>Reporte_Stock_Disponible_2026-09-29</i>); si no la trae, se usa la de hoy. '
+           'Subir de nuevo una tienda el mismo día reemplaza solo esa tienda.</div>')
+        subidos = st.file_uploader("Reporte Stock Disponible", type=["xlsx", "xls"],
+                                   accept_multiple_files=True, key="stock_subir",
+                                   label_visibility="collapsed")
+        if subidos:
+            firma = "|".join(f"{a.name}·{a.size}" for a in subidos)
+            if st.session_state.get("stock_firma") != firma:
+                st.session_state["stock_firma"] = firma
+                for m in _guardar_stock(subidos):
+                    md(f'<div class="seccion-sub">{h(m)}</div>')
+                st.session_state["aviso_respaldo"] = respaldar_en_drive()
+                st.rerun()
+        _aviso_respaldo()
+
+    hist = _hist_cargado()
+
     _bloque_bsale()
 
     if not fechas:
@@ -907,7 +999,7 @@ def vista_stock() -> None:
 
     # ── filtros ─────────────────────────────────────────────────────────────
     _pintar_calendario()
-    c0, c1, c2, c3 = st.columns([1, 1.6, 1.1, 1.1])
+    c0, c1, c2, c3 = st.columns([0.55, 2.2, 1.3, 1.1])   # fecha angosta; más espacio a tiendas
     with c0:
         elegida = st.date_input("Stock del día", fechas[-1], format="DD/MM/YYYY",
                                 key="stk_fecha_cal")
@@ -1073,6 +1165,12 @@ def vista_stock() -> None:
     filas = [_fila_res(d[d["pdv"] == p], f'<b>{h(NOMBRE_TIENDA.get(p, p))}</b>')
              for p in [x for x in pdvs if x in set(d["pdv"])]]
     total = _fila_res(d, "<b>Total</b>")
+    # ── stock hoy (sin rotación) ────────────────────────────────────────────
+    with desplegable("📦 Stock hoy", expanded=True):
+        md('<div class="seccion-sub">Stock de cada tienda y producto, ordenado de la A a la Z '
+           'por tienda, tipo de producto y SKU. Usa los filtros de arriba para acotar.</div>')
+        _tabla_stock_hoy(d, fecha)
+
     # ── detalle por SKU ─────────────────────────────────────────────────────
     with desplegable("📋 Detalle por producto", expanded=True):   # (v445) siempre abierto
         ui.seccion("Detalle por producto",
@@ -1128,7 +1226,7 @@ def vista_stock() -> None:
             "Prom. mensual": "Prom/mes", "Días sin venta": "Sin venta"})
         if "Tienda" in vista:
             vista["Tienda"] = vista["Tienda"].astype(str).str.replace(r"^CTF\s+", "", regex=True).str.title()
-        _osc = tema.actual()["clave_estado"] == "oscuro"
+        _osc = False                    # tablas siempre en claro
         COLOR_ESTADO = ({"Quiebre": ("#3a1618", "#f08a8a"), "Reponer": ("#33280a", "#fab219"),
                          "OK": ("#12301a", "#4ccf6a"), "Sobre stock": ("#2a1f45", "#c4b5fd"),
                          "Sin rotación": ("#232a36", "#aab3c0")} if _osc else
@@ -1282,33 +1380,7 @@ def vista_stock() -> None:
         filas_html = "".join(
             "<tr>" + "".join(_cel(c, r[c]) for c, _, _, _ in cols_tab) + "</tr>"
             for _, r in vt.iterrows())
-        _t = tema.actual()
-        if _osc:
-            K = {"BG": _t["tarjeta"], "BORDE": _t["borde_fuerte"], "TXT": _t["texto"], "LINEA": _t["borde"],
-                 "CERO": "#5b6575", "SA": "#1d2b44", "HOV": _t["tarjeta2"], "SAH": "#24375a"}
-        else:
-            K = {"BG": "#fff", "BORDE": "#d6dbe3", "TXT": "#10233f", "LINEA": "#edf0f4",
-                 "CERO": "#b8c0cc", "SA": "#e6eefb", "HOV": "#f4f7fb", "SAH": "#d8e5fa"}
-        _css = """<style>
-    .stkt { max-height:600px; overflow:auto; border-radius:12px; border:1px solid @BORDE; background:@BG; }
-    .stkt table { border-collapse:separate; border-spacing:0; width:100%; font-size:.76rem; color:@TXT; }
-    .stkt thead th { position:sticky; z-index:2; color:#fff; text-align:center; padding:.28rem .3rem;
-      border-right:1px solid rgba(255,255,255,.25); line-height:1.15; }
-    .stkt thead tr:first-child th { top:0; font-size:.74rem; letter-spacing:.03em; text-transform:uppercase; }
-    .stkt thead tr:nth-child(2) th { top:1.55rem; font-size:.72rem; font-weight:700; cursor:help; }
-    .stkt thead th span { font-weight:500; opacity:.85; font-size:.66rem; }
-    .stkt td { padding:.16rem .35rem; border-bottom:1px solid @LINEA; white-space:nowrap; background:@BG; }
-    .stkt td.n { text-align:right; font-variant-numeric:tabular-nums; }
-    .stkt td.cero { color:@CERO; }
-    .stkt td.sa { background:@SA; font-weight:800; text-align:right; }
-    .stkt td.desc { white-space:normal; min-width:180px; }
-    .stkt td.est { font-weight:800; text-align:center; }
-    .stkt tbody tr:hover td { background:@HOV; }
-    .stkt tbody tr:hover td.sa { background:@SAH; }
-    </style>"""
-        for _k, _v in K.items():
-            _css = _css.replace("@" + _k, _v)
-        md(_css)
+        md(_css_stkt())
         md(f'<div class="stkt"><table><thead><tr>{th1}</tr><tr>{th2}</tr></thead>'
            f'<tbody>{filas_html}</tbody></table></div>')
         if total_filas > LIMITE:
@@ -1969,12 +2041,13 @@ def _memoria_mb() -> int:
 _cab, _btn = st.columns([6, 1.1])
 with _cab:
     ui.cabecera(BASE / "assets" / "logo.png", "Stock CTF",
-                "Stock y rotación de las seis tiendas")
+                "Stock de las 8 tiendas")
 with _btn:
     md('<div style="height:1.1rem"></div>')
     tema.interruptor()
 aviso_drive(sincronizar_drive())
 vista_stock()
+desplegable_historial()
 
 _pie1, _pie2 = st.columns([6, 1.3])
 with _pie1:
